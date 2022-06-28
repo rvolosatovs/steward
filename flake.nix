@@ -37,6 +37,16 @@
           (
             (pkgs.rustBuilder.makePackageSet {
               packageFun = import "${self}/Cargo.nix";
+              packageOverrides = pkgs: let
+                const_default = pkgs.rustBuilder.rustLib.makeOverride {
+                  name = "const_default";
+                  overrideArgs = old: {features = old.features ++ ["derive"];};
+                };
+              in
+                pkgs.rustBuilder.overrides.all
+                ++ [
+                  const_default
+                ];
               rustVersion = "1.61.0";
               workspaceSrc =
                 pkgs.nix-gitignore.gitignoreRecursiveSource [
