@@ -468,22 +468,31 @@ mod tests {
                 }
             };
 
-            let _cr_vec = match Vec::<CertReq<'_>>::from_der(&ret_vec) {
-                Ok(x) => x,
-                Err(e) => {
-                    eprintln!("cr() error unpacking ASN1 array we just made {:?}", e);
-                    Vec::new()
-                }
-            };
-
             ret_vec
         }
 
         async fn attest_response(state: State, response: Response) {
             let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+            eprintln!("attest_response() body len {}", body.as_ref().len());
             let cr_vec = Vec::<Vec<u8>>::from_der(body.as_ref()).unwrap();
             assert_eq!(cr_vec.len(), 1);
-            let path = PkiPath::from_der(&cr_vec[0]).unwrap();
+            eprintln!(
+                "attest_response() cr_vec shape: ({}, {})",
+                cr_vec.len(),
+                cr_vec[0].len()
+            );
+
+            match Certificate::from_der(&cr_vec[0]) {
+                Ok(_) => {
+                    eprintln!("Converted cr_vec[0] to cert, shouldn't have been possible!");
+                }
+                Err(_) => {
+                    eprintln!("Could not make cr_vec[0] to cert, this is good, actually.");
+                }
+            }
+
+            //let path = PkiPath::from_der(&cr_vec[0]).unwrap();
+            let path = Vec::<Certificate<'_>>::from_der(cr_vec[0].as_ref()).unwrap();
             let issr = Certificate::from_der(&state.crt).unwrap();
             assert_eq!(2, path.len());
             assert_eq!(issr, path[0]);
@@ -494,10 +503,10 @@ mod tests {
         fn reencode() {
             let encoded = cr(SECP_256_R_1, vec![]);
 
-            for byte in &encoded {
+            /*for byte in &encoded {
                 eprint!("{:02X}", byte);
             }
-            eprintln!();
+            eprintln!();*/
 
             let cr_vec: Vec<Vec<u8>> = Decode::from_der(&encoded).unwrap();
             assert_eq!(cr_vec.len(), 1);
