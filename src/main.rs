@@ -42,7 +42,7 @@ use const_oid::db::rfc5280::{
 };
 use const_oid::db::rfc5912::ID_EXTENSION_REQ;
 use der::asn1::{GeneralizedTime, Ia5StringRef, UIntRef};
-use der::{Decode, Encode};
+use der::{Decode, Encode, Sequence};
 use pkcs8::PrivateKeyInfo;
 use x509::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, KeyUsages, SubjectAltName};
 use x509::name::RdnSequence;
@@ -91,6 +91,15 @@ struct State {
     key: Zeroizing<Vec<u8>>,
     crt: Vec<u8>,
     san: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Sequence)]
+struct Output<'a> {
+    /// The signing certificate chain back to the root.
+    pub chain: Vec<Certificate<'a>>,
+
+    /// All issued certificates.
+    pub issued: Vec<Certificate<'a>>,
 }
 
 impl State {
@@ -288,7 +297,11 @@ async fn attest(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-    let mut vec_return: Vec<Vec<u8>> = Vec::new();
+
+    let mut response = Output {
+        chain: vec![issuer.clone()],
+        issued: Vec::new(),
+    };
 
     // Decode and verify the certification request.
     // let cr = CertReq::from_der(body.as_ref()).or(Err(StatusCode::BAD_REQUEST))?;
@@ -391,10 +404,9 @@ async fn attest(
         let crt = Certificate::from_der(&crt).or(Err(ISE))?;
 
         // Create and return the PkiPath.
-        let pkipath: Vec<u8> = vec![issuer, crt].to_vec().unwrap();
-        vec_return.push(pkipath.to_vec().or(Err(ISE))?);
+        response.issued.push(crt);
     }
-    Ok(vec_return.to_vec().or(Err(ISE))?)
+    Ok(response.to_vec().or(Err(ISE))?)
 }
 
 #[cfg(test)]
