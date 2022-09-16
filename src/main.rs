@@ -288,125 +288,125 @@ async fn attest(
 
     eprintln!("attest() der bytes: {}", body.as_ref().len());
 
-    // let cr_vec = Vec::<CertReq<'_>>::from_der(body.as_ref()).or(Err(StatusCode::BAD_REQUEST))?;
-    let cr_vec: Vec<Vec<u8>> = match Decode::from_der(body.as_ref()) {
-        // let cr_vec = match Vec::<CertReq<'_>>::from_der(body.as_ref()) {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!("attest() error unpacking ASN1 array {:?}", e);
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-
-    let mut response = Output {
-        chain: vec![issuer.clone()],
-        issued: Vec::new(),
-    };
+    let crs: Vec<Vec<u8>> = Decode::from_der(body.as_ref()).map_err(|e| {
+        eprintln!("attest() error unpacking ASN1 array {:?}", e);
+        StatusCode::BAD_REQUEST
+    })?;
 
     // Decode and verify the certification request.
-    // let cr = CertReq::from_der(body.as_ref()).or(Err(StatusCode::BAD_REQUEST))?;
-    for cr_bytes in cr_vec {
-        let issuer = issuer.clone();
-        let cr = CertReq::from_der(&cr_bytes).or(Err(StatusCode::BAD_REQUEST))?;
-        let cri = cr.verify().or(Err(StatusCode::BAD_REQUEST))?;
+    crs.into_iter()
+        .map(|cr| {
+            let issuer = issuer.clone();
+            let cr = CertReq::from_der(&cr).or(Err(StatusCode::BAD_REQUEST))?;
+            let cri = cr.verify().or(Err(StatusCode::BAD_REQUEST))?;
 
-        // Validate requested extensions.
-        let mut attested = false;
-        let mut extensions = Vec::new();
-        for attr in cri.attributes.iter() {
-            if attr.oid != ID_EXTENSION_REQ {
-                return Err(StatusCode::BAD_REQUEST);
-            }
+            // Validate requested extensions.
+            let mut attested = false;
+            let mut extensions = Vec::new();
+            for attr in cri.attributes.iter() {
+                if attr.oid != ID_EXTENSION_REQ {
+                    return Err(StatusCode::BAD_REQUEST);
+                }
 
-            for any in attr.values.iter() {
-                let ereq: ExtensionReq<'_> = any.decode_into().or(Err(StatusCode::BAD_REQUEST))?;
-                for ext in Vec::from(ereq) {
-                    // If the issuer is self-signed, we are in debug mode.
-                    let iss = &issuer.tbs_certificate;
-                    let dbg = iss.issuer_unique_id == iss.subject_unique_id;
-                    let dbg = dbg && iss.issuer == iss.subject;
+                for any in attr.values.iter() {
+                    let ereq: ExtensionReq<'_> =
+                        any.decode_into().or(Err(StatusCode::BAD_REQUEST))?;
+                    for ext in Vec::from(ereq) {
+                        // If the issuer is self-signed, we are in debug mode.
+                        let iss = &issuer.tbs_certificate;
+                        let dbg = iss.issuer_unique_id == iss.subject_unique_id;
+                        let dbg = dbg && iss.issuer == iss.subject;
 
-                    // Validate the extension.
-                    let (copy, att) = match ext.extn_id {
-                        Kvm::OID => (Kvm::default().verify(&cri, &ext, dbg), Kvm::ATT),
-                        Sgx::OID => (Sgx::default().verify(&cri, &ext, dbg), Sgx::ATT),
-                        Snp::OID => (Snp::default().verify(&cri, &ext, dbg), Snp::ATT),
-                        _ => return Err(StatusCode::BAD_REQUEST), // unsupported extension
-                    };
+                        // Validate the extension.
+                        let (copy, att) = match ext.extn_id {
+                            Kvm::OID => (Kvm::default().verify(&cri, &ext, dbg), Kvm::ATT),
+                            Sgx::OID => (Sgx::default().verify(&cri, &ext, dbg), Sgx::ATT),
+                            Snp::OID => (Snp::default().verify(&cri, &ext, dbg), Snp::ATT),
+                            _ => return Err(StatusCode::BAD_REQUEST), // unsupported extension
+                        };
 
-                    // Save results.
-                    attested |= att;
-                    if copy.or(Err(StatusCode::BAD_REQUEST))? {
-                        extensions.push(ext);
+                        // Save results.
+                        attested |= att;
+                        if copy.or(Err(StatusCode::BAD_REQUEST))? {
+                            extensions.push(ext);
+                        }
                     }
                 }
             }
-        }
-        if !attested {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
+            if !attested {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
 
-        // Get the current time and the expiration of the cert.
-        let now = SystemTime::now();
-        let end = now + Duration::from_secs(60 * 60 * 24 * 28);
-        let validity = Validity {
-            not_before: Time::try_from(now).or(Err(ISE))?,
-            not_after: Time::try_from(end).or(Err(ISE))?,
-        };
+            // Get the current time and the expiration of the cert.
+            let now = SystemTime::now();
+            let end = now + Duration::from_secs(60 * 60 * 24 * 28);
+            let validity = Validity {
+                not_before: Time::try_from(now).or(Err(ISE))?,
+                not_after: Time::try_from(end).or(Err(ISE))?,
+            };
 
-        // Create the basic subject alt name.
-        let mut sans = vec![GeneralName::DnsName(
-            Ia5StringRef::new("foo.bar.hub.profian.com").or(Err(ISE))?,
-        )];
+            // Create the basic subject alt name.
+            let mut sans = vec![GeneralName::DnsName(
+                Ia5StringRef::new("foo.bar.hub.profian.com").or(Err(ISE))?,
+            )];
 
-        // Optionally, add the configured subject alt name.
-        if let Some(name) = state.san.as_ref() {
-            sans.push(GeneralName::DnsName(Ia5StringRef::new(name).or(Err(ISE))?));
-        }
+            // Optionally, add the configured subject alt name.
+            if let Some(name) = state.san.as_ref() {
+                sans.push(GeneralName::DnsName(Ia5StringRef::new(name).or(Err(ISE))?));
+            }
 
-        // Encode the subject alt name.
-        let sans: Vec<u8> = SubjectAltName(sans).to_vec().or(Err(ISE))?;
-        extensions.push(x509::ext::Extension {
-            extn_id: ID_CE_SUBJECT_ALT_NAME,
-            critical: false,
-            extn_value: &sans,
-        });
+            // Encode the subject alt name.
+            let sans: Vec<u8> = SubjectAltName(sans).to_vec().or(Err(ISE))?;
+            extensions.push(x509::ext::Extension {
+                extn_id: ID_CE_SUBJECT_ALT_NAME,
+                critical: false,
+                extn_value: &sans,
+            });
 
-        // Add extended key usage.
-        let eku = ExtendedKeyUsage(vec![ID_KP_SERVER_AUTH, ID_KP_CLIENT_AUTH])
+            // Add extended key usage.
+            let eku = ExtendedKeyUsage(vec![ID_KP_SERVER_AUTH, ID_KP_CLIENT_AUTH])
+                .to_vec()
+                .or(Err(ISE))?;
+            extensions.push(x509::ext::Extension {
+                extn_id: ID_CE_EXT_KEY_USAGE,
+                critical: false,
+                extn_value: &eku,
+            });
+
+            // Generate the instance id.
+            let uuid = uuid::Uuid::new_v4();
+
+            // Create the new certificate.
+            let tbs = TbsCertificate {
+                version: x509::Version::V3,
+                serial_number: UIntRef::new(uuid.as_bytes()).or(Err(ISE))?,
+                signature: isskey.signs_with().or(Err(ISE))?,
+                issuer: issuer.clone().tbs_certificate.subject.clone(),
+                validity,
+                subject: RdnSequence(Vec::new()),
+                subject_public_key_info: cri.public_key,
+                issuer_unique_id: issuer.clone().tbs_certificate.subject_unique_id,
+                subject_unique_id: None,
+                extensions: Some(extensions),
+            };
+
+            // Sign the certificate.
+            tbs.sign(&isskey).or(Err(ISE))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|crts| {
+            let mut issued = Vec::with_capacity(crts.len());
+            for crt in crts.iter() {
+                let crt = Certificate::from_der(&crt).or(Err(ISE))?;
+                issued.push(crt)
+            }
+            Output {
+                chain: vec![issuer.clone()],
+                issued,
+            }
             .to_vec()
-            .or(Err(ISE))?;
-        extensions.push(x509::ext::Extension {
-            extn_id: ID_CE_EXT_KEY_USAGE,
-            critical: false,
-            extn_value: &eku,
-        });
-
-        // Generate the instance id.
-        let uuid = uuid::Uuid::new_v4();
-
-        // Create the new certificate.
-        let tbs = TbsCertificate {
-            version: x509::Version::V3,
-            serial_number: UIntRef::new(uuid.as_bytes()).or(Err(ISE))?,
-            signature: isskey.signs_with().or(Err(ISE))?,
-            issuer: issuer.clone().tbs_certificate.subject.clone(),
-            validity,
-            subject: RdnSequence(Vec::new()),
-            subject_public_key_info: cri.public_key,
-            issuer_unique_id: issuer.clone().tbs_certificate.subject_unique_id,
-            subject_unique_id: None,
-            extensions: Some(extensions),
-        };
-
-        // Sign the certificate.
-        let crt = tbs.sign(&isskey).or(Err(ISE))?;
-        let crt = Certificate::from_der(&crt).or(Err(ISE))?;
-
-        // Create and return the PkiPath.
-        response.issued.push(crt);
-    }
-    Ok(response.to_vec().or(Err(ISE))?)
+            .or(Err(ISE))
+        })
 }
 
 #[cfg(test)]
