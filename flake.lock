@@ -158,15 +158,16 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1665065681,
-        "narHash": "sha256-SBBgBzV4agkdQJVWm7ods3e3lY5b2A3sRAOAgS9Sg2I=",
-        "owner": "profianinc",
+        "lastModified": 1665416843,
+        "narHash": "sha256-yJ5vtW+VHnLNvkqfrtU3tDnTPoS0VeahwCslmaohd8M=",
+        "owner": "rvolosatovs",
         "repo": "nixpkgs",
-        "rev": "61c6327b2ddd4c89f5632da00193b58aba81725e",
+        "rev": "a95fa68ddb8e60ea4a46051bd6d3c29d0b0907e8",
         "type": "github"
       },
       "original": {
-        "owner": "profianinc",
+        "owner": "rvolosatovs",
+        "ref": "fix/powerpc64le",
         "repo": "nixpkgs",
         "type": "github"
       }
